@@ -77,8 +77,11 @@ jobs:
         env:
           GH_PAT: ${{ secrets.SYNC_TOKEN }}
         run: |
+          # Ensure we use the token for authentication
+          git config --global url."https://x-access-token:${GH_PAT}@github.com/".insteadOf "https://github.com/"
+          
           # Clone the target repository
-          git clone https://x-access-token:${GH_PAT}@${TARGET_REPO_URL#https://} target-repo
+          git clone ${TARGET_REPO_URL} target-repo
           echo "Target repo clone status: $?"
         continue-on-error: true  # Continue if target repo doesn't exist yet
       
@@ -98,15 +101,23 @@ jobs:
           git config user.name "github actions repo-sync-bot"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git commit -m "Initialize repository"
-          git remote add origin https://x-access-token:${GH_PAT}@${TARGET_REPO_URL#https://}
+          
+          # Use PAT in URL for authentication
+          AUTH_URL=$(echo ${TARGET_REPO_URL} | sed "s/https:\/\//https:\/\/x-access-token:${GH_PAT}@/")
+          git remote add origin ${AUTH_URL}
           git push -u origin $TARGET_BRANCH
           echo "Created new target repository with branch: $TARGET_BRANCH"
       
       - name: Setup Git Config in Target Repository
+        env:
+          GH_PAT: ${{ secrets.SYNC_TOKEN }}
         run: |
           cd target-repo
           git config user.name "github actions repo-sync-bot"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Ensure we have the PAT configured globally
+          git config --global url."https://x-access-token:${GH_PAT}@github.com/".insteadOf "https://github.com/"
           
           # Check if we're in a git repo
           echo "Checking git status..."
@@ -126,7 +137,6 @@ jobs:
           echo "Current branch: $(git branch --show-current)"
           echo "Remote branches:"
           git branch -r
-          echo "Remote URL: $(git remote get-url origin)"
       
       - name: Direct File Sync
         env:
@@ -194,7 +204,9 @@ jobs:
               FORCE_OPTION="--force"
             fi
             
-            git push $FORCE_OPTION origin $TARGET_BRANCH
+            # Use PAT in URL for authentication
+            AUTH_URL=$(echo ${TARGET_REPO_URL} | sed "s/https:\/\//https:\/\/x-access-token:${GH_PAT}@/")
+            git push $FORCE_OPTION ${AUTH_URL} $TARGET_BRANCH
             echo "✅ Successfully pushed all files to target repository"
           else
             echo "No changes detected"
@@ -211,14 +223,11 @@ jobs:
           git config user.name "github actions repo-sync-bot"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Double-check we're using the correct remote URL
-          echo "Remote URL check: $(git remote get-url origin)"
-          
           # Create markdown file with sync details
           cat > sync-status.md << EOF
           # Repository Sync Status
           
-          Last synchronized on: **2025-04-02 10:19:01**
+          Last synchronized on: **2025-04-02 10:21:49**
           
           ## Latest Commit Details
           
@@ -260,8 +269,9 @@ jobs:
           
           git commit -m "Update sync status [skip ci]"
           
-          # Use explicit URL for pushing to make sure we're pushing to the target repo
-          git push https://x-access-token:${GH_PAT}@${TARGET_REPO_URL#https://} ${TARGET_BRANCH}
+          # Use PAT in URL for authentication
+          AUTH_URL=$(echo ${TARGET_REPO_URL} | sed "s/https:\/\//https:\/\/x-access-token:${GH_PAT}@/")
+          git push ${AUTH_URL} ${TARGET_BRANCH}
           
           echo "✅ Created sync status markdown file"
       
