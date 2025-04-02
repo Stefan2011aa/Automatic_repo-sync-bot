@@ -79,6 +79,7 @@ jobs:
         run: |
           # Clone the target repository
           git clone https://x-access-token:${GH_PAT}@${TARGET_REPO_URL#https://} target-repo
+          echo "Target repo clone status: $?"
         continue-on-error: true  # Continue if target repo doesn't exist yet
       
       - name: Create Target Repo If Not Exists
@@ -86,6 +87,7 @@ jobs:
         env:
           GH_PAT: ${{ secrets.SYNC_TOKEN }}
         run: |
+          echo "Creating new target repository..."
           mkdir -p target-repo
           cd target-repo
           git init
@@ -105,6 +107,18 @@ jobs:
           cd target-repo
           git config user.name "github actions repo-sync-bot"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Check if we're in a git repo
+          echo "Checking git status..."
+          if [ ! -d ".git" ]; then
+            echo "ERROR: .git directory is missing!"
+            ls -la
+            cd ..
+            echo "Parent directory contents:"
+            ls -la
+            exit 1
+          fi
+          
           # Create/switch to the target branch
           git checkout $TARGET_BRANCH 2>/dev/null || git checkout -b $TARGET_BRANCH
           
@@ -133,21 +147,36 @@ jobs:
           echo "LAST_COMMIT_DATE=$LAST_COMMIT_DATE" >> $GITHUB_ENV
           echo "LAST_COMMIT_FILES=$LAST_COMMIT_FILES" >> $GITHUB_ENV
           
-          echo "Preparing target repository..."
-          cd ../target-repo
+          # Create a temp directory for the transfer
+          mkdir -p ../temp-dir
           
-          # Clear all files in target repo except .git directory
+          # First copy source files to temp dir
+          echo "Copying files to temp directory..."
+          cp -r * ../temp-dir/ 2>/dev/null || true
+          cp -r .[^.]* ../temp-dir/ 2>/dev/null || true
+          
+          # Go to target repo and prepare for copying
+          cd ../target-repo
+          echo "Target repo directory before cleaning:"
+          ls -la
+          
+          # Save the .git directory
+          echo "Cleaning target repo (preserving .git)..."
           find . -mindepth 1 -maxdepth 1 -not -name ".git" -exec rm -rf {} \; 2>/dev/null || true
           
-          echo "Copying files from source to target..."
-          # Copy all files from source repo to target repo
-          cp -r ../source-repo/* . 2>/dev/null || true
-          cp -r ../source-repo/.* . 2>/dev/null || true
-          # Remove .git if it was copied
-          rm -rf .git 2>/dev/null || true
-          
-          echo "Files in target repo after copy:"
+          echo "Target repo after cleaning:"
           ls -la
+          
+          # Copy from temp to target
+          echo "Copying files from temp to target..."
+          cp -r ../temp-dir/* . 2>/dev/null || true
+          cp -r ../temp-dir/.[^.]* . 2>/dev/null || true
+          
+          echo "Final files in target repo:"
+          ls -la
+          
+          echo "Checking git status..."
+          git status
           
           echo "Adding all files to git..."
           git add --all
@@ -192,10 +221,11 @@ jobs:
           | Author | ${LAST_COMMIT_AUTHOR} |
           | Date | ${LAST_COMMIT_DATE} |
           | Files Changed | ${LAST_COMMIT_FILES} |
-
+          
 
           > Synced By Automatic Repository Syncing Bot
           
+
           ###### Copyright © 2025 Saviru Kashmira Atapattu
           
           ## Sync Statistics

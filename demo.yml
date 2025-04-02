@@ -24,7 +24,7 @@ jobs:
       - name: Checkout Source Repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Get all history and tags
+          fetch-depth: 0
           path: source-repo
       
       - name: Extract branch name from push event
@@ -37,135 +37,180 @@ jobs:
           if [ -f .env ]; then
             echo "Loading configuration from .env file"
             # Export all variables from .env file to environment
-            export $(grep -v '^#' .env | xargs)
+            set -a
+            . ./.env
+            set +a
             
             # Set GitHub environment variables
             echo "TARGET_REPO_URL=$TARGET_REPO_URL" >> $GITHUB_ENV
             
-            # If TARGET_BRANCH is set, use it, otherwise use SOURCE_BRANCH
+            # If TARGET_BRANCH is set, use it regardless of source branch
             if [ -n "$TARGET_BRANCH" ]; then
-              echo "CONFIGURED_TARGET_BRANCH=$TARGET_BRANCH" >> $GITHUB_ENV
+              echo "TARGET_BRANCH=$TARGET_BRANCH" >> $GITHUB_ENV
+              echo "Using target branch from .env: $TARGET_BRANCH"
             else
-              echo "CONFIGURED_TARGET_BRANCH=$SOURCE_BRANCH" >> $GITHUB_ENV
+              # If no TARGET_BRANCH and source is main, use RepoBot
+              if [ "$SOURCE_BRANCH" = "main" ]; then
+                echo "TARGET_BRANCH=RepoBot" >> $GITHUB_ENV
+                echo "Source branch is main and no target branch specified. Using RepoBot."
+              else
+                echo "TARGET_BRANCH=$SOURCE_BRANCH" >> $GITHUB_ENV
+                echo "Using source branch: $SOURCE_BRANCH"
+              fi
             fi
-            
-            echo "Loaded TARGET_REPO_URL and TARGET_BRANCH from .env file"
           else
             echo "No .env file found, using repository secrets"
             echo "TARGET_REPO_URL=${{ secrets.TARGET_REPO_URL }}" >> $GITHUB_ENV
-            echo "CONFIGURED_TARGET_BRANCH=$SOURCE_BRANCH" >> $GITHUB_ENV
-          fi
-      
-      - name: Apply custom branch logic
-        run: |
-          # If source branch is main OR target branch is main, use RepoBot
-          if [ "$SOURCE_BRANCH" = "main" ] || [ "$CONFIGURED_TARGET_BRANCH" = "main" ]; then
-            echo "TARGET_BRANCH=RepoBot" >> $GITHUB_ENV
-            echo "Using branch 'RepoBot' because source or target is main"
-          else
-            echo "TARGET_BRANCH=$CONFIGURED_TARGET_BRANCH" >> $GITHUB_ENV
-            echo "Using configured target branch: $CONFIGURED_TARGET_BRANCH"
+            
+            # If source is main, use RepoBot
+            if [ "$SOURCE_BRANCH" = "main" ]; then
+              echo "TARGET_BRANCH=RepoBot" >> $GITHUB_ENV
+              echo "Source branch is main. Using RepoBot."
+            else
+              echo "TARGET_BRANCH=$SOURCE_BRANCH" >> $GITHUB_ENV
+              echo "Using source branch: $SOURCE_BRANCH"
+            fi
           fi
       
       - name: Checkout Target Repository
+        id: checkout-target
         env:
           GH_PAT: ${{ secrets.SYNC_TOKEN }}
         run: |
           # Clone the target repository
           git clone https://x-access-token:${GH_PAT}@${TARGET_REPO_URL#https://} target-repo
+          echo "Target repo clone status: $?"
         continue-on-error: true  # Continue if target repo doesn't exist yet
       
       - name: Create Target Repo If Not Exists
+        if: steps.checkout-target.outcome == 'failure'
         env:
           GH_PAT: ${{ secrets.SYNC_TOKEN }}
-        if: steps.clone-target.outcome == 'failure'
         run: |
+          echo "Creating new target repository..."
           mkdir -p target-repo
           cd target-repo
           git init
           git checkout -b $TARGET_BRANCH
+          # Create an empty commit so we can push
+          touch .gitkeep
+          git add .gitkeep
+          git config user.name "github actions repo-sync-bot"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "Initialize repository"
+          git remote add origin https://x-access-token:${GH_PAT}@${TARGET_REPO_URL#https://}
+          git push -u origin $TARGET_BRANCH
+          echo "Created new target repository with branch: $TARGET_BRANCH"
       
       - name: Setup Git Config in Target Repository
         run: |
           cd target-repo
           git config user.name "github actions repo-sync-bot"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          # Create the branch if it doesn't exist yet
+          
+          # Check if we're in a git repo
+          echo "Checking git status..."
+          if [ ! -d ".git" ]; then
+            echo "ERROR: .git directory is missing!"
+            ls -la
+            cd ..
+            echo "Parent directory contents:"
+            ls -la
+            exit 1
+          fi
+          
+          # Create/switch to the target branch
           git checkout $TARGET_BRANCH 2>/dev/null || git checkout -b $TARGET_BRANCH
+          
+          # Debug information
+          echo "Current branch: $(git branch --show-current)"
+          echo "Remote branches:"
+          git branch -r
       
-      - name: Sync Changes with Modified Commit Messages
-        id: sync-changes
+      - name: Direct File Sync
         env:
           GH_PAT: ${{ secrets.SYNC_TOKEN }}
         run: |
-          cd source-repo
-          # Get the list of commits on the current branch
-          COMMITS=$(git log --format="%H" --reverse origin/$SOURCE_BRANCH..$SOURCE_BRANCH 2>/dev/null || git log --format="%H" --reverse $SOURCE_BRANCH)
+          echo "Starting direct file sync..."
           
-          # Save last commit details for the markdown file
+          # Get stats from source repo for the markdown file
+          cd source-repo
           LAST_COMMIT=$(git log -1 --pretty=format:'%H')
           LAST_COMMIT_MSG=$(git log -1 --pretty=format:'%s')
           LAST_COMMIT_AUTHOR=$(git log -1 --pretty=format:'%an')
           LAST_COMMIT_DATE=$(git log -1 --pretty=format:'%ad' --date=format:'%Y-%m-%d %H:%M:%S')
           LAST_COMMIT_FILES=$(git show --name-only --format='' $LAST_COMMIT | wc -l)
           
-          # Export as environment variables for next steps
           echo "LAST_COMMIT=$LAST_COMMIT" >> $GITHUB_ENV
           echo "LAST_COMMIT_MSG=$LAST_COMMIT_MSG" >> $GITHUB_ENV
           echo "LAST_COMMIT_AUTHOR=$LAST_COMMIT_AUTHOR" >> $GITHUB_ENV
           echo "LAST_COMMIT_DATE=$LAST_COMMIT_DATE" >> $GITHUB_ENV
           echo "LAST_COMMIT_FILES=$LAST_COMMIT_FILES" >> $GITHUB_ENV
           
+          # Create a temp directory for the transfer
+          mkdir -p ../temp-dir
+          
+          # First copy source files to temp dir
+          echo "Copying files to temp directory..."
+          cp -r * ../temp-dir/ 2>/dev/null || true
+          cp -r .[^.]* ../temp-dir/ 2>/dev/null || true
+          
+          # Go to target repo and prepare for copying
           cd ../target-repo
-          # Apply each commit with modified message
-          SYNCED_COMMITS=0
-          for COMMIT in $COMMITS; do
-            cd ../source-repo
-            COMMIT_MSG=$(git log -1 --pretty=%B $COMMIT)
-            COMMIT_DATE=$(git log -1 --pretty=%aD $COMMIT)
-            COMMIT_AUTHOR_NAME=$(git log -1 --pretty=%an $COMMIT)
-            COMMIT_AUTHOR_EMAIL=$(git log -1 --pretty=%ae $COMMIT)
-            
-            # Create patch without commit message
-            git format-patch -1 --stdout $COMMIT > ../commit.patch
-            
-            cd ../target-repo
-            # Apply the patch
-            git apply --index ../commit.patch
-            
-            # Create new commit with modified message
-            git config user.name "$COMMIT_AUTHOR_NAME"
-            git config user.email "$COMMIT_AUTHOR_EMAIL"
-            git commit --date="$COMMIT_DATE" -m "$COMMIT_MSG (repo-sync-bot)"
-            SYNCED_COMMITS=$((SYNCED_COMMITS+1))
-          done
+          echo "Target repo directory before cleaning:"
+          ls -la
           
-          echo "SYNCED_COMMITS=$SYNCED_COMMITS" >> $GITHUB_ENV
+          # Save the .git directory
+          echo "Cleaning target repo (preserving .git)..."
+          find . -mindepth 1 -maxdepth 1 -not -name ".git" -exec rm -rf {} \; 2>/dev/null || true
           
-          # Push changes to target repository
-          FORCE_OPTION=""
-          if [[ "${{ github.event.inputs.force_push }}" == "true" ]]; then
-            FORCE_OPTION="--force"
+          echo "Target repo after cleaning:"
+          ls -la
+          
+          # Copy from temp to target
+          echo "Copying files from temp to target..."
+          cp -r ../temp-dir/* . 2>/dev/null || true
+          cp -r ../temp-dir/.[^.]* . 2>/dev/null || true
+          
+          echo "Final files in target repo:"
+          ls -la
+          
+          echo "Checking git status..."
+          git status
+          
+          echo "Adding all files to git..."
+          git add --all
+          
+          # Check if there are changes to commit
+          if git status --porcelain | grep .; then
+            echo "Changes detected, committing..."
+            git commit -m "Sync files from source repository (repo-sync-bot)" || echo "No changes to commit"
+            echo "SYNCED_COMMITS=1" >> $GITHUB_ENV
+            
+            echo "Pushing changes to $TARGET_BRANCH..."
+            FORCE_OPTION=""
+            if [[ "${{ github.event.inputs.force_push }}" == "true" ]]; then
+              FORCE_OPTION="--force"
+            fi
+            
+            git push $FORCE_OPTION origin $TARGET_BRANCH
+            echo "✅ Successfully pushed all files to target repository"
+          else
+            echo "No changes detected"
+            echo "SYNCED_COMMITS=0" >> $GITHUB_ENV
           fi
-          
-          git push $FORCE_OPTION https://x-access-token:${GH_PAT}@${TARGET_REPO_URL#https://} $TARGET_BRANCH
-          
-          echo "✅ Successfully synced to target repository with modified commit messages"
       
       - name: Create Sync Status Markdown
         env:
-          GH_PAT: ${{ secrets.SYNC_TOKEN }}  # Added this environment variable
+          GH_PAT: ${{ secrets.SYNC_TOKEN }}
         run: |
           cd target-repo
-          
-          # Get current date and time in UTC with the specified format
-          CURRENT_DATE=$(date -u "+%Y-%m-%d %H:%M:%S")
           
           # Create markdown file with sync details
           cat > sync-status.md << EOF
           # Repository Sync Status
           
-          Last synchronized on: **${CURRENT_DATE} UTC**
+          Last synchronized on: **$(date -u "+%Y-%m-%d %H:%M:%S")**
           
           ## Latest Commit Details
           
@@ -176,12 +221,14 @@ jobs:
           | Author | ${LAST_COMMIT_AUTHOR} |
           | Date | ${LAST_COMMIT_DATE} |
           | Files Changed | ${LAST_COMMIT_FILES} |
-          | Synced By Automatic Repository Syncing Bot |
           
+
+          > Synced By Automatic Repository Syncing Bot
+          
+
           ###### Copyright © 2025 Saviru Kashmira Atapattu
           
           ## Sync Statistics
-          - Number of commits synced in last operation: ${SYNCED_COMMITS}
           - Source Branch: \`${SOURCE_BRANCH}\`
           - Target Branch: \`${TARGET_BRANCH}\`
           
@@ -193,48 +240,16 @@ jobs:
           
           EOF
           
-          # Commit and push the markdown file
-          git config user.name "github actions repo-sync-bot"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Debug information
+          echo "Sync status file created. Contents:"
+          cat sync-status.md
+          
+          echo "Adding markdown file to git..."
           git add sync-status.md
           git commit -m "Update sync status [skip ci]"
-          git push https://x-access-token:${GH_PAT}@${TARGET_REPO_URL#https://} $TARGET_BRANCH
+          git push origin $TARGET_BRANCH
           
           echo "✅ Created sync status markdown file"
-      
-      - name: Sync Tags
-        env:
-          GH_PAT: ${{ secrets.SYNC_TOKEN }}
-        run: |
-          cd source-repo
-          TAGS=$(git tag)
-          
-          if [ -n "$TAGS" ]; then
-            cd ../target-repo
-            
-            for TAG in $TAGS; do
-              # Get the tag message and commit
-              cd ../source-repo
-              TAG_MSG=$(git tag -l -n99 $TAG | sed 's/^[^ ]* //')
-              TAG_COMMIT=$(git rev-list -1 $TAG)
-              TAG_DATE=$(git log -1 --date=iso --format=%ad $TAG_COMMIT)
-              
-              # Find corresponding commit in target repo (match by commit message)
-              cd ../target-repo
-              SOURCE_MSG=$(cd ../source-repo && git log -1 --pretty=%B $TAG_COMMIT)
-              TARGET_COMMIT=$(git log --pretty=%H --grep="$SOURCE_MSG")
-              
-              if [ -n "$TARGET_COMMIT" ]; then
-                # Create tag in target repo
-                git tag -a $TAG -m "$TAG_MSG" $TARGET_COMMIT
-              fi
-            done
-            
-            # Push tags
-            git push --tags https://x-access-token:${GH_PAT}@${TARGET_REPO_URL#https://}
-          fi
-          
-          echo "✅ Tags synced to target repository"
       
       - name: Notify on Failure
         if: failure()
