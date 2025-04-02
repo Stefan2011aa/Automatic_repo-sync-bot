@@ -153,6 +153,8 @@ jobs:
           echo "✅ Successfully synced to target repository with modified commit messages"
       
       - name: Create Sync Status Markdown
+        env:
+          GH_PAT: ${{ secrets.SYNC_TOKEN }}  # Added this environment variable
         run: |
           cd target-repo
           
@@ -176,6 +178,8 @@ jobs:
           | Files Changed | ${LAST_COMMIT_FILES} |
           | Synced By Automatic Repository Syncing Bot |
           
+          ###### Copyright © 2025 Saviru Kashmira Atapattu
+          
           ## Sync Statistics
           - Number of commits synced in last operation: ${SYNCED_COMMITS}
           - Source Branch: \`${SOURCE_BRANCH}\`
@@ -186,9 +190,6 @@ jobs:
           ## Repository Links
           - [Source Repository](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY})
           - [Target Repository](${TARGET_REPO_URL})
-          <br><br>
-
-          ###### Copyright © 2025 Saviru Kashmira Atapattu
           
           EOF
           
