@@ -176,7 +176,9 @@ jobs:
           | Author | ${LAST_COMMIT_AUTHOR} |
           | Date | ${LAST_COMMIT_DATE} |
           | Files Changed | ${LAST_COMMIT_FILES} |
-          | Synced By | Saviru |
+          | Synced By Automatic Repository Syncing Bot |
+          
+          ###### Copyright © 2025 Saviru Kashmira Atapattu
           
           ## Sync Statistics
           - Number of commits synced in last operation: ${SYNCED_COMMITS}
