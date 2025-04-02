@@ -241,7 +241,6 @@ jobs:
           > Synced By Automatic Repository Syncing Bot
           
           
-          ###### Copyright © 2025 Saviru Kashmira Atapattu
           
           ## Sync Statistics
           - Source Branch: \`${SOURCE_BRANCH}\`
@@ -252,6 +251,20 @@ jobs:
           ## Repository Links
           - [Source Repository](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY})
           - [Target Repository](${TARGET_REPO_URL})
+          
+          
+          ### Thank you for using Automatic Repository Syncing Bot! You can add this bot to your repository for automatic syncing.
+          
+          #### For more information, [visit the documentation](https://github.com/Saviru/Automatic_repo-sync-bot).
+          <br>
+          <hr>
+          ###### Copyright © 2025 Saviru Kashmira Atapattu
+          <br>
+
+          Github: [@Saviru](https://github.com/Saviru)
+          Personal Website: [Saviru](https://saviru.github.io/)
+
+          <hr>
           EOF
           
           git add sync-status.md
