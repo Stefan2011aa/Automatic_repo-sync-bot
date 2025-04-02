@@ -135,6 +135,32 @@ jobs:
             git checkout $TARGET_BRANCH 2>/dev/null || git checkout -b $TARGET_BRANCH
           fi
       
+      - name: Prepare Source Files
+        run: |
+          # Make a copy of source repo without workflow files
+          mkdir -p clean-source
+          cd source-repo
+          
+          # Copy all files except .github/workflows directory
+          find . -type f -not -path "./.git*" -not -path "./.github/workflows*" -exec cp --parents {} ../clean-source/ \;
+          
+          # Copy dot files except .git and .github/workflows
+          find . -name ".*" -type f -not -path "./.git*" -not -path "./.github/workflows*" -exec cp --parents {} ../clean-source/ \;
+          
+          # Create other directories that might be needed, but not .github/workflows
+          find . -type d -not -path "./.git*" -not -path "./.github/workflows*" -not -path "./.github" | while read dir; do
+            mkdir -p "../clean-source/$dir"
+          done
+          
+          # Create .github directory if it exists but don't copy workflows
+          if [ -d ".github" ]; then
+            mkdir -p "../clean-source/.github"
+            find .github -type f -not -path "*.github/workflows*" -exec cp --parents {} ../clean-source/ \;
+          fi
+          
+          echo "Source files prepared without workflow files"
+          ls -la ../clean-source
+      
       - name: Sync Files
         env:
           GH_PAT: ${{ secrets.SYNC_TOKEN }}
@@ -160,10 +186,10 @@ jobs:
           echo "Removing files from target repo (preserving .git)"
           find . -mindepth 1 -not -path "./.git*" -exec rm -rf {} \; 2>/dev/null || true
           
-          echo "Copying files from source repo to target"
+          echo "Copying files from clean source to target"
           cd "$GITHUB_WORKSPACE"
-          cp -r source-repo/* target-repo/ 2>/dev/null || true
-          cp -r source-repo/.[^.]* target-repo/ 2>/dev/null || true
+          cp -r clean-source/* target-repo/ 2>/dev/null || true
+          cp -r clean-source/.[^.]* target-repo/ 2>/dev/null || true
           
           # Remove any .git that was copied over
           rm -rf target-repo/.git
@@ -199,7 +225,7 @@ jobs:
           cat > sync-status.md << EOF
           # Repository Sync Status
           
-          Last synchronized on: **2025-04-02 10:36:09**
+          Last synchronized on: **2025-04-02 10:38:09**
           
           ## Latest Commit Details
           
