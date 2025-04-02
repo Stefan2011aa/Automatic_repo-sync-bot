@@ -174,7 +174,7 @@ jobs:
           | Author | ${LAST_COMMIT_AUTHOR} |
           | Date | ${LAST_COMMIT_DATE} |
           | Files Changed | ${LAST_COMMIT_FILES} |
-          | Synced By | Saviru |
+          | Synced By Automatic Repository Syncing Bot |
           
           ## Sync Statistics
           - Number of commits synced in last operation: ${SYNCED_COMMITS}
@@ -186,6 +186,9 @@ jobs:
           ## Repository Links
           - [Source Repository](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY})
           - [Target Repository](${TARGET_REPO_URL})
+          <br><br>
+
+          ###### Copyright © 2025 Saviru Kashmira Atapattu
           
           EOF
           
