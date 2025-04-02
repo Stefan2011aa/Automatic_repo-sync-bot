@@ -252,7 +252,7 @@ jobs:
           cd target-repo
           
           # Get current date and time in UTC with the specified format
-          CURRENT_DATE="2025-04-02 09:52:22"
+          CURRENT_DATE=$(date -u "+%Y-%m-%d %H:%M:%S")
           
           # Create markdown file with sync details
           cat > sync-status.md << EOF
@@ -269,7 +269,12 @@ jobs:
           | Author | ${LAST_COMMIT_AUTHOR} |
           | Date | ${LAST_COMMIT_DATE} |
           | Files Changed | ${LAST_COMMIT_FILES} |
-          | Synced By | Saviru |
+          
+
+          >> Synced By Automatic Repository Syncing Bot
+          
+          
+          ###### Copyright © 2025 Saviru Kashmira Atapattu
           
           ## Sync Statistics
           - Number of commits synced in last operation: ${SYNCED_COMMITS}
