@@ -31,23 +31,28 @@ jobs:
           fetch-depth: 0
           path: source-repo
       
+      - name: Debug Workspace
+        run: |
+          pwd
+          ls -la
+          echo "Current directory structure:"
+          find . -type d -maxdepth 2
+      
       - name: Extract branch name from push event
         run: |
           echo "SOURCE_BRANCH=${GITHUB_REF#refs/heads/}" >> $GITHUB_ENV
         
       - name: Load Environment Variables
         run: |
-          cd source-repo
+          cd source-repo || exit 1
+          echo "Current directory: $(pwd)"
+          
           if [ -f .env ]; then
             echo "Loading configuration from .env file"
             set -a
             . ./.env
             set +a
             echo "TARGET_REPO_URL=$TARGET_REPO_URL" >> $GITHUB_ENV
-            
-            # Extract owner/repo format for GitHub Actions
-            REPO_PARTS=$(echo $TARGET_REPO_URL | sed -E 's|https://github.com/||' | sed -E 's|\.git$||')
-            echo "REPO_PATH=$REPO_PARTS" >> $GITHUB_ENV
             
             if [ -n "$TARGET_BRANCH" ]; then
               echo "TARGET_BRANCH=$TARGET_BRANCH" >> $GITHUB_ENV
@@ -62,10 +67,6 @@ jobs:
             echo "No .env file found, using repository secrets"
             echo "TARGET_REPO_URL=${{ secrets.TARGET_REPO_URL }}" >> $GITHUB_ENV
             
-            # Extract owner/repo format for GitHub Actions
-            REPO_PARTS=$(echo ${{ secrets.TARGET_REPO_URL }} | sed -E 's|https://github.com/||' | sed -E 's|\.git$||')
-            echo "REPO_PATH=$REPO_PARTS" >> $GITHUB_ENV
-            
             if [ "$SOURCE_BRANCH" = "main" ]; then
               echo "TARGET_BRANCH=RepoBot" >> $GITHUB_ENV
             else
@@ -73,12 +74,39 @@ jobs:
             fi
           fi
       
+      - name: Get Source Repo Stats
+        run: |
+          echo "Checking source repository in $(pwd)/source-repo"
+          if [ ! -d "source-repo/.git" ]; then
+            echo "ERROR: source-repo/.git directory is missing!"
+            ls -la source-repo
+            exit 1
+          fi
+          
+          cd source-repo
+          echo "Getting commit information..."
+          
+          LAST_COMMIT=$(git log -1 --pretty=format:'%H')
+          LAST_COMMIT_MSG=$(git log -1 --pretty=format:'%s')
+          LAST_COMMIT_AUTHOR=$(git log -1 --pretty=format:'%an')
+          LAST_COMMIT_DATE=$(git log -1 --pretty=format:'%ad' --date=format:'%Y-%m-%d %H:%M:%S')
+          LAST_COMMIT_FILES=$(git show --name-only --format='' $LAST_COMMIT | wc -l)
+          
+          echo "LAST_COMMIT=$LAST_COMMIT" >> $GITHUB_ENV
+          echo "LAST_COMMIT_MSG=$LAST_COMMIT_MSG" >> $GITHUB_ENV
+          echo "LAST_COMMIT_AUTHOR=$LAST_COMMIT_AUTHOR" >> $GITHUB_ENV
+          echo "LAST_COMMIT_DATE=$LAST_COMMIT_DATE" >> $GITHUB_ENV
+          echo "LAST_COMMIT_FILES=$LAST_COMMIT_FILES" >> $GITHUB_ENV
+          
+          echo "Commit info collected successfully"
+      
       - name: Checkout Target Repository
         id: checkout-target
         env:
           GH_PAT: ${{ secrets.SYNC_TOKEN }}
         run: |
           # Clone the target repository using token
+          echo "Cloning target repository: $TARGET_REPO_URL"
           git clone https://x-access-token:${GH_PAT}@${TARGET_REPO_URL#https://} target-repo
           echo "Target repo clone status: $?"
         continue-on-error: true  # Continue if target repo doesn't exist yet
@@ -111,30 +139,31 @@ jobs:
         env:
           GH_PAT: ${{ secrets.SYNC_TOKEN }}
         run: |
-          # Get stats from source repo for the markdown file
-          cd source-repo
-          LAST_COMMIT=$(git log -1 --pretty=format:'%H')
-          LAST_COMMIT_MSG=$(git log -1 --pretty=format:'%s')
-          LAST_COMMIT_AUTHOR=$(git log -1 --pretty=format:'%an')
-          LAST_COMMIT_DATE=$(git log -1 --pretty=format:'%ad' --date=format:'%Y-%m-%d %H:%M:%S')
-          LAST_COMMIT_FILES=$(git show --name-only --format='' $LAST_COMMIT | wc -l)
+          # Make sure we start from the workspace root
+          cd "$GITHUB_WORKSPACE"
           
-          echo "LAST_COMMIT=$LAST_COMMIT" >> $GITHUB_ENV
-          echo "LAST_COMMIT_MSG=$LAST_COMMIT_MSG" >> $GITHUB_ENV
-          echo "LAST_COMMIT_AUTHOR=$LAST_COMMIT_AUTHOR" >> $GITHUB_ENV
-          echo "LAST_COMMIT_DATE=$LAST_COMMIT_DATE" >> $GITHUB_ENV
-          echo "LAST_COMMIT_FILES=$LAST_COMMIT_FILES" >> $GITHUB_ENV
+          echo "Current directory: $(pwd)"
+          echo "Directories available:"
+          ls -la
           
-          # Remove all files from target repo except .git
-          cd ../target-repo
+          echo "Removing files from target repo (preserving .git)"
+          cd target-repo
           find . -mindepth 1 -not -path "./.git*" -delete
           
-          # Copy all files from source repo to target
-          cp -r ../source-repo/. .
-          rm -rf .git
+          echo "Copying files from source repo to target"
+          cd "$GITHUB_WORKSPACE"
+          cp -r source-repo/* target-repo/ 2>/dev/null || true
+          cp -r source-repo/.[^.]* target-repo/ 2>/dev/null || true
           
-          # Add and commit changes
+          # Remove .git if it was copied
+          rm -rf target-repo/.git/
+          
+          echo "Files in target repo after copy:"
+          ls -la target-repo/
+          
+          cd target-repo
           git add --all
+          
           if git status --porcelain | grep .; then
             git commit -m "Sync files from source repository"
             echo "SYNCED_COMMITS=1" >> $GITHUB_ENV
@@ -151,7 +180,7 @@ jobs:
           cat > sync-status.md << EOF
           # Repository Sync Status
           
-          Last synchronized on: **2025-04-02 10:32:12**
+          Last synchronized on: **2025-04-02 10:34:10**
           
           ## Latest Commit Details
           
