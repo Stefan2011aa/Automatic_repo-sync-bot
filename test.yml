@@ -4,6 +4,7 @@ on:
   # Trigger on pushes to any branch
   push:
     branches: [ '**' ]
+  # Optional: Allow manual triggering
   workflow_dispatch:
     inputs:
       force_push:
@@ -26,15 +27,49 @@ jobs:
           fetch-depth: 0  # Get all history and tags
           path: source-repo
       
-      - name: Extract branch name
-        shell: bash
-        run: echo "BRANCH_NAME=${GITHUB_REF#refs/heads/}" >> $GITHUB_ENV
-        working-directory: source-repo
+      - name: Extract branch name from push event
+        run: |
+          echo "SOURCE_BRANCH=${GITHUB_REF#refs/heads/}" >> $GITHUB_ENV
+        
+      - name: Load Environment Variables
+        run: |
+          cd source-repo
+          if [ -f .env ]; then
+            echo "Loading configuration from .env file"
+            # Export all variables from .env file to environment
+            export $(grep -v '^#' .env | xargs)
+            
+            # Set GitHub environment variables
+            echo "TARGET_REPO_URL=$TARGET_REPO_URL" >> $GITHUB_ENV
+            
+            # If TARGET_BRANCH is set, use it, otherwise use SOURCE_BRANCH
+            if [ -n "$TARGET_BRANCH" ]; then
+              echo "CONFIGURED_TARGET_BRANCH=$TARGET_BRANCH" >> $GITHUB_ENV
+            else
+              echo "CONFIGURED_TARGET_BRANCH=$SOURCE_BRANCH" >> $GITHUB_ENV
+            fi
+            
+            echo "Loaded TARGET_REPO_URL and TARGET_BRANCH from .env file"
+          else
+            echo "No .env file found, using repository secrets"
+            echo "TARGET_REPO_URL=${{ secrets.TARGET_REPO_URL }}" >> $GITHUB_ENV
+            echo "CONFIGURED_TARGET_BRANCH=$SOURCE_BRANCH" >> $GITHUB_ENV
+          fi
+      
+      - name: Apply custom branch logic
+        run: |
+          # If source branch is main OR target branch is main, use RepoBot
+          if [ "$SOURCE_BRANCH" = "main" ] || [ "$CONFIGURED_TARGET_BRANCH" = "main" ]; then
+            echo "TARGET_BRANCH=RepoBot" >> $GITHUB_ENV
+            echo "Using branch 'RepoBot' because source or target is main"
+          else
+            echo "TARGET_BRANCH=$CONFIGURED_TARGET_BRANCH" >> $GITHUB_ENV
+            echo "Using configured target branch: $CONFIGURED_TARGET_BRANCH"
+          fi
       
       - name: Checkout Target Repository
         env:
           GH_PAT: ${{ secrets.SYNC_TOKEN }}
-          TARGET_REPO_URL: ${{ secrets.TARGET_REPO_URL }}
         run: |
           # Clone the target repository
           git clone https://x-access-token:${GH_PAT}@${TARGET_REPO_URL#https://} target-repo
@@ -43,13 +78,12 @@ jobs:
       - name: Create Target Repo If Not Exists
         env:
           GH_PAT: ${{ secrets.SYNC_TOKEN }}
-          TARGET_REPO_URL: ${{ secrets.TARGET_REPO_URL }}
         if: steps.clone-target.outcome == 'failure'
         run: |
           mkdir -p target-repo
           cd target-repo
           git init
-          git checkout -b $BRANCH_NAME
+          git checkout -b $TARGET_BRANCH
       
       - name: Setup Git Config in Target Repository
         run: |
@@ -57,17 +91,16 @@ jobs:
           git config user.name "github actions repo-sync-bot"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           # Create the branch if it doesn't exist yet
-          git checkout $BRANCH_NAME || git checkout -b $BRANCH_NAME
+          git checkout $TARGET_BRANCH 2>/dev/null || git checkout -b $TARGET_BRANCH
       
       - name: Sync Changes with Modified Commit Messages
         id: sync-changes
         env:
           GH_PAT: ${{ secrets.SYNC_TOKEN }}
-          TARGET_REPO_URL: ${{ secrets.TARGET_REPO_URL }}
         run: |
           cd source-repo
           # Get the list of commits on the current branch
-          COMMITS=$(git log --format="%H" --reverse origin/$BRANCH_NAME..$BRANCH_NAME 2>/dev/null || git log --format="%H" --reverse $BRANCH_NAME)
+          COMMITS=$(git log --format="%H" --reverse origin/$SOURCE_BRANCH..$SOURCE_BRANCH 2>/dev/null || git log --format="%H" --reverse $SOURCE_BRANCH)
           
           # Save last commit details for the markdown file
           LAST_COMMIT=$(git log -1 --pretty=format:'%H')
@@ -115,7 +148,7 @@ jobs:
             FORCE_OPTION="--force"
           fi
           
-          git push $FORCE_OPTION https://x-access-token:${GH_PAT}@${TARGET_REPO_URL#https://} $BRANCH_NAME
+          git push $FORCE_OPTION https://x-access-token:${GH_PAT}@${TARGET_REPO_URL#https://} $TARGET_BRANCH
           
           echo "✅ Successfully synced to target repository with modified commit messages"
       
@@ -123,7 +156,7 @@ jobs:
         run: |
           cd target-repo
           
-          # Get current date and time in UTC
+          # Get current date and time in UTC with the specified format
           CURRENT_DATE=$(date -u "+%Y-%m-%d %H:%M:%S")
           
           # Create markdown file with sync details
@@ -141,11 +174,12 @@ jobs:
           | Author | ${LAST_COMMIT_AUTHOR} |
           | Date | ${LAST_COMMIT_DATE} |
           | Files Changed | ${LAST_COMMIT_FILES} |
-          | Synced By | github actions repo-sync-bot |
+          | Synced By | Saviru |
           
           ## Sync Statistics
           - Number of commits synced in last operation: ${SYNCED_COMMITS}
-          - Branch: \`${BRANCH_NAME}\`
+          - Source Branch: \`${SOURCE_BRANCH}\`
+          - Target Branch: \`${TARGET_BRANCH}\`
           
           *This file was automatically generated by the repo-sync-bot.*
           
@@ -160,14 +194,13 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add sync-status.md
           git commit -m "Update sync status [skip ci]"
-          git push https://x-access-token:${GH_PAT}@${TARGET_REPO_URL#https://} $BRANCH_NAME
+          git push https://x-access-token:${GH_PAT}@${TARGET_REPO_URL#https://} $TARGET_BRANCH
           
           echo "✅ Created sync status markdown file"
       
       - name: Sync Tags
         env:
           GH_PAT: ${{ secrets.SYNC_TOKEN }}
-          TARGET_REPO_URL: ${{ secrets.TARGET_REPO_URL }}
         run: |
           cd source-repo
           TAGS=$(git tag)
