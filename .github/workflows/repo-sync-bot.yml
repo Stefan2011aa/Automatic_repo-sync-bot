@@ -146,21 +146,40 @@ jobs:
           echo "Directories available:"
           ls -la
           
-          echo "Removing files from target repo (preserving .git)"
+          # Create a temporary copy of .git directory
+          echo "Backing up .git directory from target repo"
           cd target-repo
-          find . -mindepth 1 -not -path "./.git*" -delete
+          if [ ! -d ".git" ]; then
+            echo "ERROR: .git directory is missing in target repo!"
+            ls -la
+            exit 1
+          fi
+          cp -r .git ../git-backup
+
+          # Remove all files except .git
+          echo "Removing files from target repo (preserving .git)"
+          find . -mindepth 1 -not -path "./.git*" -exec rm -rf {} \; 2>/dev/null || true
           
           echo "Copying files from source repo to target"
           cd "$GITHUB_WORKSPACE"
           cp -r source-repo/* target-repo/ 2>/dev/null || true
           cp -r source-repo/.[^.]* target-repo/ 2>/dev/null || true
           
-          # Remove .git if it was copied
-          rm -rf target-repo/.git/
+          # Remove any .git that was copied over
+          rm -rf target-repo/.git
+          # Restore the original .git directory
+          cp -r git-backup target-repo/.git
           
           echo "Files in target repo after copy:"
           ls -la target-repo/
           
+          # Verify .git directory exists
+          if [ ! -d "target-repo/.git" ]; then
+            echo "ERROR: .git directory is missing after file copy!"
+            exit 1
+          fi
+          
+          # Perform git operations
           cd target-repo
           git add --all
           
@@ -180,7 +199,7 @@ jobs:
           cat > sync-status.md << EOF
           # Repository Sync Status
           
-          Last synchronized on: **2025-04-02 10:34:10**
+          Last synchronized on: **2025-04-02 10:36:09**
           
           ## Latest Commit Details
           
@@ -217,6 +236,13 @@ jobs:
           GH_PAT: ${{ secrets.SYNC_TOKEN }}
         run: |
           cd target-repo
+          
+          # Verify .git directory exists before pushing
+          if [ ! -d ".git" ]; then
+            echo "ERROR: .git directory is missing before push!"
+            ls -la
+            exit 1
+          fi
           
           # Push using token authentication
           FORCE_OPTION=""
