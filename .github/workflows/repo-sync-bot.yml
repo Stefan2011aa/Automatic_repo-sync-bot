@@ -225,7 +225,7 @@ jobs:
           cat > sync-status.md << EOF
           # Repository Sync Status
           
-          Last synchronized on: **2025-04-02 10:38:09**
+          Last synchronized on: **$(date -u "+%Y-%m-%d %H:%M:%S")**
           
           ## Latest Commit Details
           
