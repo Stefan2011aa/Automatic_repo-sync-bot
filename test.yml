@@ -42,32 +42,38 @@ jobs:
             # Set GitHub environment variables
             echo "TARGET_REPO_URL=$TARGET_REPO_URL" >> $GITHUB_ENV
             
-            # If TARGET_BRANCH is set, use it, otherwise use SOURCE_BRANCH
+            # If TARGET_BRANCH is set, use it regardless of source branch
             if [ -n "$TARGET_BRANCH" ]; then
-              echo "CONFIGURED_TARGET_BRANCH=$TARGET_BRANCH" >> $GITHUB_ENV
+              echo "TARGET_BRANCH=$TARGET_BRANCH" >> $GITHUB_ENV
+              echo "Using target branch from .env: $TARGET_BRANCH"
             else
-              echo "CONFIGURED_TARGET_BRANCH=$SOURCE_BRANCH" >> $GITHUB_ENV
+              # If no TARGET_BRANCH and source is main, use RepoBot
+              if [ "$SOURCE_BRANCH" = "main" ]; then
+                echo "TARGET_BRANCH=RepoBot" >> $GITHUB_ENV
+                echo "Source branch is main and no target branch specified. Using RepoBot."
+              else
+                echo "TARGET_BRANCH=$SOURCE_BRANCH" >> $GITHUB_ENV
+                echo "Using source branch: $SOURCE_BRANCH"
+              fi
             fi
             
-            echo "Loaded TARGET_REPO_URL and TARGET_BRANCH from .env file"
+            echo "Loaded configuration from .env file"
           else
             echo "No .env file found, using repository secrets"
             echo "TARGET_REPO_URL=${{ secrets.TARGET_REPO_URL }}" >> $GITHUB_ENV
-            echo "CONFIGURED_TARGET_BRANCH=$SOURCE_BRANCH" >> $GITHUB_ENV
-          fi
-      
-      - name: Apply custom branch logic
-        run: |
-          # If source branch is main OR target branch is main, use RepoBot
-          if [ "$SOURCE_BRANCH" = "main" ] || [ "$CONFIGURED_TARGET_BRANCH" = "main" ]; then
-            echo "TARGET_BRANCH=RepoBot" >> $GITHUB_ENV
-            echo "Using branch 'RepoBot' because source or target is main"
-          else
-            echo "TARGET_BRANCH=$CONFIGURED_TARGET_BRANCH" >> $GITHUB_ENV
-            echo "Using configured target branch: $CONFIGURED_TARGET_BRANCH"
+            
+            # If source is main, use RepoBot
+            if [ "$SOURCE_BRANCH" = "main" ]; then
+              echo "TARGET_BRANCH=RepoBot" >> $GITHUB_ENV
+              echo "Source branch is main. Using RepoBot."
+            else
+              echo "TARGET_BRANCH=$SOURCE_BRANCH" >> $GITHUB_ENV
+              echo "Using source branch: $SOURCE_BRANCH"
+            fi
           fi
       
       - name: Checkout Target Repository
+        id: checkout-target
         env:
           GH_PAT: ${{ secrets.SYNC_TOKEN }}
         run: |
@@ -76,14 +82,37 @@ jobs:
         continue-on-error: true  # Continue if target repo doesn't exist yet
       
       - name: Create Target Repo If Not Exists
+        if: steps.checkout-target.outcome == 'failure'
         env:
           GH_PAT: ${{ secrets.SYNC_TOKEN }}
-        if: steps.clone-target.outcome == 'failure'
         run: |
           mkdir -p target-repo
           cd target-repo
           git init
           git checkout -b $TARGET_BRANCH
+          echo "TARGET_REPO_EMPTY=true" >> $GITHUB_ENV
+          echo "Created new target repository with branch: $TARGET_BRANCH"
+      
+      - name: Check If Target Repo Is Empty
+        if: steps.checkout-target.outcome == 'success'
+        run: |
+          cd target-repo
+          # Check if target repo has any commits
+          if git rev-parse --verify HEAD >/dev/null 2>&1; then
+            # Has at least one commit
+            # Check if there are any files
+            FILE_COUNT=$(git ls-files | wc -l)
+            if [ "$FILE_COUNT" -eq "0" ]; then
+              echo "TARGET_REPO_EMPTY=true" >> $GITHUB_ENV
+              echo "Target repository is empty (no files). Will do full sync."
+            else
+              echo "TARGET_REPO_EMPTY=false" >> $GITHUB_ENV
+              echo "Target repository has files. Will do incremental sync."
+            fi
+          else
+            echo "TARGET_REPO_EMPTY=true" >> $GITHUB_ENV
+            echo "Target repository has no commits. Will do full sync."
+          fi
       
       - name: Setup Git Config in Target Repository
         run: |
@@ -93,14 +122,57 @@ jobs:
           # Create the branch if it doesn't exist yet
           git checkout $TARGET_BRANCH 2>/dev/null || git checkout -b $TARGET_BRANCH
       
-      - name: Sync Changes with Modified Commit Messages
-        id: sync-changes
+      - name: Full Sync (Empty Target Repository)
+        if: env.TARGET_REPO_EMPTY == 'true'
         env:
           GH_PAT: ${{ secrets.SYNC_TOKEN }}
         run: |
+          echo "Performing full repository sync..."
+          
+          # Save last commit details for the markdown file
+          cd source-repo
+          LAST_COMMIT=$(git log -1 --pretty=format:'%H')
+          LAST_COMMIT_MSG=$(git log -1 --pretty=format:'%s')
+          LAST_COMMIT_AUTHOR=$(git log -1 --pretty=format:'%an')
+          LAST_COMMIT_DATE=$(git log -1 --pretty=format:'%ad' --date=format:'%Y-%m-%d %H:%M:%S')
+          LAST_COMMIT_FILES=$(git show --name-only --format='' $LAST_COMMIT | wc -l)
+          
+          # Export as environment variables for next steps
+          echo "LAST_COMMIT=$LAST_COMMIT" >> $GITHUB_ENV
+          echo "LAST_COMMIT_MSG=$LAST_COMMIT_MSG" >> $GITHUB_ENV
+          echo "LAST_COMMIT_AUTHOR=$LAST_COMMIT_AUTHOR" >> $GITHUB_ENV
+          echo "LAST_COMMIT_DATE=$LAST_COMMIT_DATE" >> $GITHUB_ENV
+          echo "LAST_COMMIT_FILES=$LAST_COMMIT_FILES" >> $GITHUB_ENV
+          
+          # Copy everything from source repo to target repo (except .git directory)
+          find . -mindepth 1 -maxdepth 1 -not -name ".git" -exec cp -r {} ../target-repo/ \;
+          
+          # Commit changes to target repo
+          cd ../target-repo
+          git add --all
+          git commit -m "Initial sync from source repository (repo-sync-bot)"
+          
+          # Push to target repo
+          FORCE_OPTION=""
+          if [[ "${{ github.event.inputs.force_push }}" == "true" ]]; then
+            FORCE_OPTION="--force"
+          fi
+          
+          git push $FORCE_OPTION https://x-access-token:${GH_PAT}@${TARGET_REPO_URL#https://} $TARGET_BRANCH
+          
+          echo "SYNCED_COMMITS=1" >> $GITHUB_ENV
+          echo "✅ Successfully performed full sync to target repository"
+      
+      - name: Incremental Sync (Commit by Commit)
+        if: env.TARGET_REPO_EMPTY != 'true'
+        env:
+          GH_PAT: ${{ secrets.SYNC_TOKEN }}
+        run: |
+          echo "Performing incremental sync..."
+          
           cd source-repo
           # Get the list of commits on the current branch
-          COMMITS=$(git log --format="%H" --reverse origin/$SOURCE_BRANCH..$SOURCE_BRANCH 2>/dev/null || git log --format="%H" --reverse $SOURCE_BRANCH)
+          COMMITS=$(git log --format="%H" --reverse origin/$SOURCE_BRANCH..$SOURCE_BRANCH 2>/dev/null || git log -n 10 --format="%H" --reverse $SOURCE_BRANCH)
           
           # Save last commit details for the markdown file
           LAST_COMMIT=$(git log -1 --pretty=format:'%H')
@@ -131,33 +203,56 @@ jobs:
             
             cd ../target-repo
             # Apply the patch
-            git apply --index ../commit.patch
+            git apply --index ../commit.patch || {
+              echo "Warning: Could not apply patch cleanly. Trying to copy changed files instead."
+              # Alternative: copy the specific files from this commit
+              cd ../source-repo
+              FILES_CHANGED=$(git show --name-only --format='' $COMMIT)
+              for FILE in $FILES_CHANGED; do
+                if [ -f "$FILE" ]; then
+                  mkdir -p $(dirname "../target-repo/$FILE")
+                  cp "$FILE" "../target-repo/$FILE"
+                fi
+              done
+              cd ../target-repo
+              git add --all
+            }
             
             # Create new commit with modified message
             git config user.name "$COMMIT_AUTHOR_NAME"
             git config user.email "$COMMIT_AUTHOR_EMAIL"
-            git commit --date="$COMMIT_DATE" -m "$COMMIT_MSG (repo-sync-bot)"
-            SYNCED_COMMITS=$((SYNCED_COMMITS+1))
+            if git diff --staged --quiet; then
+              echo "No changes detected for this commit"
+            else
+              git commit --date="$COMMIT_DATE" -m "$COMMIT_MSG (repo-sync-bot)"
+              SYNCED_COMMITS=$((SYNCED_COMMITS+1))
+            fi
           done
           
           echo "SYNCED_COMMITS=$SYNCED_COMMITS" >> $GITHUB_ENV
           
-          # Push changes to target repository
-          FORCE_OPTION=""
-          if [[ "${{ github.event.inputs.force_push }}" == "true" ]]; then
-            FORCE_OPTION="--force"
+          # If we synced any commits, push them
+          if [ $SYNCED_COMMITS -gt 0 ]; then
+            # Push changes to target repository
+            FORCE_OPTION=""
+            if [[ "${{ github.event.inputs.force_push }}" == "true" ]]; then
+              FORCE_OPTION="--force"
+            fi
+            
+            git push $FORCE_OPTION https://x-access-token:${GH_PAT}@${TARGET_REPO_URL#https://} $TARGET_BRANCH
+            echo "✅ Successfully synced $SYNCED_COMMITS commits to target repository"
+          else
+            echo "No changes to push to target repository"
           fi
-          
-          git push $FORCE_OPTION https://x-access-token:${GH_PAT}@${TARGET_REPO_URL#https://} $TARGET_BRANCH
-          
-          echo "✅ Successfully synced to target repository with modified commit messages"
       
       - name: Create Sync Status Markdown
+        env:
+          GH_PAT: ${{ secrets.SYNC_TOKEN }}
         run: |
           cd target-repo
           
           # Get current date and time in UTC with the specified format
-          CURRENT_DATE=$(date -u "+%Y-%m-%d %H:%M:%S")
+          CURRENT_DATE="2025-04-02 09:52:22"
           
           # Create markdown file with sync details
           cat > sync-status.md << EOF
@@ -174,7 +269,7 @@ jobs:
           | Author | ${LAST_COMMIT_AUTHOR} |
           | Date | ${LAST_COMMIT_DATE} |
           | Files Changed | ${LAST_COMMIT_FILES} |
-          | Synced By Automatic Repository Syncing Bot |
+          | Synced By | Saviru |
           
           ## Sync Statistics
           - Number of commits synced in last operation: ${SYNCED_COMMITS}
@@ -186,9 +281,6 @@ jobs:
           ## Repository Links
           - [Source Repository](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY})
           - [Target Repository](${TARGET_REPO_URL})
-          <br><br>
-
-          ###### Copyright © 2025 Saviru Kashmira Atapattu
           
           EOF
           
